@@ -12,7 +12,6 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from gemini_service import call_gemini
-from decision_engine import classify_risk
 from utils.validators import sanitize_input, validate_input_length, is_meaningful_input
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
@@ -112,7 +111,7 @@ def analyze(payload: AnalyzeRequest):
     condition: str = gemini_result["condition"]
 
     # ── Risk classification ───────────────────────────────────────────────────
-    risk = classify_risk(symptoms)
+    risk = gemini_result.get("risk_level", "LOW")
 
     # ── Structured request log ────────────────────────────────────────────────
     log_entry = {
