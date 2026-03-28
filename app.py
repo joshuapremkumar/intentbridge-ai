@@ -3,23 +3,29 @@ app.py
 IntentBridge AI — FastAPI entry point with Google Cloud integration.
 """
 
-import logging
 import json
+import logging
 import os
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
+
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
+from starlette.requests import Request
 
 from gemini_service import call_gemini
-from utils.validators import sanitize_input, validate_input_length, is_meaningful_input
-from google_cloud import setup_cloud_logging, get_gemini_api_key, find_nearby_hospitals
+from google_cloud import (
+    find_nearby_hospitals,
+    get_places_api_key,
+    setup_cloud_logging,
+)
+from utils.validators import is_meaningful_input, sanitize_input, validate_input_length
 
 PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "")
 
-# ── Logging setup ─────────────────────────────────────────────────────────────
 LOG_DIR = Path(__file__).parent / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -33,11 +39,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize Cloud Logging on startup
-setup_cloud_logging()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    setup_cloud_logging()
+    logger.info("IntentBridge AI started")
+    yield
+    logger.info("IntentBridge AI shutdown")
 
 
-# ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(
     title="IntentBridge AI",
     description=(
@@ -47,18 +57,8 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
-
-
-# ── Schemas ───────────────────────────────────────────────────────────────────
-class AnalyzeRequest(BaseModel):
-    input: str = Field(
-        ...,
-        min_length=3,
-        max_length=2000,
-        description="Unstructured user text describing symptoms or health concerns.",
-        examples=["I have had a headache and fever for two days and feel very tired."],
-    )
 
 
 class ExtractedData(BaseModel):
@@ -74,6 +74,16 @@ class HospitalInfo(BaseModel):
     open_now: Optional[bool] = None
 
 
+class AnalyzeRequest(BaseModel):
+    input: str = Field(
+        ...,
+        min_length=3,
+        max_length=2000,
+        description="Unstructured user text describing symptoms or health concerns.",
+        examples=["I have had a headache and fever for two days and feel very tired."],
+    )
+
+
 class AnalyzeResponse(BaseModel):
     extracted_data: ExtractedData
     risk_level: str
@@ -81,9 +91,8 @@ class AnalyzeResponse(BaseModel):
     hospitals: Optional[list[HospitalInfo]] = None
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
 @app.get("/", tags=["UI"])
-def serve_ui():
+def serve_ui() -> HTMLResponse:
     """Serves the main application frontend interface."""
     html_path = Path(__file__).parent / "templates" / "index.html"
     if not html_path.exists():
@@ -94,7 +103,7 @@ def serve_ui():
 
 
 @app.get("/health", tags=["Health"])
-def health_check():
+def health_check() -> dict[str, Any]:
     """Service health check."""
     return {
         "status": "ok",
@@ -104,7 +113,7 @@ def health_check():
 
 
 @app.post("/analyze", response_model=AnalyzeResponse, tags=["Triage"])
-def analyze(payload: AnalyzeRequest):
+def analyze(payload: AnalyzeRequest) -> JSONResponse | AnalyzeResponse:
     """
     Analyze unstructured user text using Gemini.
 
@@ -112,7 +121,6 @@ def analyze(payload: AnalyzeRequest):
     (LOW / MEDIUM / HIGH) determined by keyword-based rule logic.
     """
     try:
-        # ── Input sanitization & validation ──────────────────────────────────────
         clean_input = sanitize_input(payload.input)
 
         length_error = validate_input_length(clean_input)
@@ -127,36 +135,29 @@ def analyze(payload: AnalyzeRequest):
 
         logger.info("Processing /analyze request.")
 
-        # ── Gemini extraction ─────────────────────────────────────────────────────
         gemini_result = call_gemini(clean_input)
 
         if gemini_result.get("error"):
             logger.error("Gemini error: %s", gemini_result["error"])
-            return JSONResponse(status_code=500, content=gemini_result)
+            return JSONResponse(status_code=502, content=gemini_result)
 
         symptoms: list[str] = gemini_result["symptoms"]
         condition: str = gemini_result["condition"]
+        risk_level: str = gemini_result.get("risk_level", "LOW")
 
-        # ── Risk classification ───────────────────────────────────────────────────
-        risk_level = gemini_result.get("risk_level", "LOW")
-
-        maps_link = None
-        hospitals = None
+        maps_link: Optional[str] = None
+        hospitals: Optional[list[HospitalInfo]] = None
 
         if risk_level in ("MEDIUM", "HIGH"):
             maps_link = "https://www.google.com/maps/search/hospitals+near+me"
-
             places_api_key = os.getenv("PLACES_API_KEY")
             if not places_api_key and PROJECT_ID:
-                places_api_key = get_gemini_api_key(
-                    PROJECT_ID.replace("GEMINI_API_KEY", "PLACES_API_KEY")
-                )
+                places_api_key = get_places_api_key(PROJECT_ID)
 
             nearby = find_nearby_hospitals(api_key=places_api_key, max_results=3)
             if nearby:
                 hospitals = [HospitalInfo(**h) for h in nearby]
 
-        # ── Structured request log ────────────────────────────────────────────────
         log_entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "input": clean_input,
@@ -164,7 +165,7 @@ def analyze(payload: AnalyzeRequest):
             "condition": condition,
             "risk_level": risk_level,
         }
-        with open(LOG_DIR / "requests.jsonl", "a") as f:
+        with open(LOG_DIR / "requests.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(log_entry) + "\n")
 
         logger.info(
@@ -180,8 +181,8 @@ def analyze(payload: AnalyzeRequest):
 
     except HTTPException:
         raise
-    except Exception as exc:
-        logger.error("Unexpected error in /analyze endpoint: %s", exc, exc_info=True)
+    except (ValueError, RuntimeError) as exc:
+        logger.error("Expected error in /analyze endpoint: %s", exc)
         return JSONResponse(
             status_code=500,
             content={
@@ -200,7 +201,7 @@ def get_hospitals(
     location: Optional[str] = Query(
         None, description="Location name (e.g., 'New York')"
     ),
-):
+) -> list[HospitalInfo]:
     """
     Find nearby hospitals using Google Places API.
 
@@ -208,12 +209,7 @@ def get_hospitals(
     """
     places_api_key = os.getenv("PLACES_API_KEY")
     if not places_api_key and PROJECT_ID:
-        try:
-            from google_cloud import get_places_api_key
-
-            places_api_key = get_places_api_key(PROJECT_ID)
-        except Exception:
-            pass
+        places_api_key = get_places_api_key(PROJECT_ID)
 
     search_location = location or "current location"
     hospitals = find_nearby_hospitals(
@@ -224,12 +220,9 @@ def get_hospitals(
         max_results=5,
     )
 
-    if not hospitals:
-        return []
-
     return [HospitalInfo(**h) for h in hospitals]
 
 
 @app.exception_handler(HTTPException)
-async def http_exception_handler(request, exc):
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})

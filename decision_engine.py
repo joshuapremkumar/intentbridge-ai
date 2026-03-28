@@ -1,40 +1,103 @@
 """
 decision_engine.py
 Keyword-based rule logic to determine risk level from extracted symptoms.
-Deliberately simple — Version 1 baseline. No ML, no Gemini dependency.
+Uses frozensets for O(1) lookup performance.
 """
 
-from typing import List
+HIGH_RISK_KEYWORDS = frozenset(
+    {
+        "chest pain",
+        "chest tightness",
+        "heart attack",
+        "stroke",
+        "seizure",
+        "unconscious",
+        "unresponsive",
+        "difficulty breathing",
+        "shortness of breath",
+        "severe bleeding",
+        "blood in urine",
+        "blood in stool",
+        "vomiting blood",
+        "coughing blood",
+        "paralysis",
+        "sudden numbness",
+        "severe head injury",
+        "anaphylaxis",
+        "allergic reaction",
+        "severe allergic",
+        "suicidal",
+        "overdose",
+        "poisoning",
+    }
+)
 
-# ── Keyword dictionaries ──────────────────────────────────────────────────────
+MEDIUM_RISK_KEYWORDS = frozenset(
+    {
+        "fever",
+        "high temperature",
+        "persistent cough",
+        "abdominal pain",
+        "stomach pain",
+        "vomiting",
+        "diarrhea",
+        "dizziness",
+        "fainting",
+        "severe headache",
+        "migraine",
+        "back pain",
+        "joint pain",
+        "swelling",
+        "rash",
+        "skin rash",
+        "infection",
+        "urinary tract",
+        "uti",
+        "dehydration",
+        "extreme fatigue",
+        "blurred vision",
+        "ear pain",
+        "sore throat",
+        "difficulty swallowing",
+    }
+)
 
-HIGH_RISK_KEYWORDS = {
-    "chest pain", "chest tightness", "heart attack", "stroke", "seizure",
-    "unconscious", "unresponsive", "difficulty breathing", "shortness of breath",
-    "severe bleeding", "blood in urine", "blood in stool", "vomiting blood",
-    "coughing blood", "paralysis", "sudden numbness", "severe head injury",
-    "anaphylaxis", "allergic reaction", "severe allergic",
-    "suicidal", "overdose", "poisoning",
-}
+LOW_RISK_KEYWORDS = frozenset(
+    {
+        "headache",
+        "runny nose",
+        "stuffy nose",
+        "sneezing",
+        "mild cough",
+        "mild fever",
+        "cold",
+        "flu",
+        "fatigue",
+        "tiredness",
+        "sore muscles",
+        "minor cut",
+        "bruise",
+        "indigestion",
+        "heartburn",
+        "bloating",
+        "mild nausea",
+        "constipation",
+        "dry skin",
+        "itching",
+        "insomnia",
+    }
+)
 
-MEDIUM_RISK_KEYWORDS = {
-    "fever", "high temperature", "persistent cough", "abdominal pain",
-    "stomach pain", "vomiting", "diarrhea", "dizziness", "fainting",
-    "severe headache", "migraine", "back pain", "joint pain", "swelling",
-    "rash", "skin rash", "infection", "urinary tract", "uti",
-    "dehydration", "extreme fatigue", "blurred vision", "ear pain",
-    "sore throat", "difficulty swallowing",
-}
 
-LOW_RISK_KEYWORDS = {
-    "headache", "runny nose", "stuffy nose", "sneezing", "mild cough",
-    "mild fever", "cold", "flu", "fatigue", "tiredness", "sore muscles",
-    "minor cut", "bruise", "indigestion", "heartburn", "bloating",
-    "mild nausea", "constipation", "dry skin", "itching", "insomnia",
-}
+def _normalize_symptoms(symptoms: list[str]) -> frozenset[str]:
+    return frozenset(s.lower().strip() for s in symptoms)
 
 
-def classify_risk_level(symptoms: List[str]) -> str:
+def _contains_keyword(symptoms_set: frozenset[str], keywords: frozenset[str]) -> bool:
+    return bool(symptoms_set & keywords)
+
+
+def classify_risk_level(symptoms: list[str]) -> str:
     """
     Determine risk level (LOW / MEDIUM / HIGH) from a list of symptom strings.
 
@@ -52,16 +115,12 @@ def classify_risk_level(symptoms: List[str]) -> str:
     if not symptoms:
         return "LOW"
 
-    normalized = [s.lower().strip() for s in symptoms]
+    symptoms_set = _normalize_symptoms(symptoms)
 
-    for symptom in normalized:
-        for keyword in HIGH_RISK_KEYWORDS:
-            if keyword in symptom:  # symptom contains the keyword phrase
-                return "HIGH"
+    if _contains_keyword(symptoms_set, HIGH_RISK_KEYWORDS):
+        return "HIGH"
 
-    for symptom in normalized:
-        for keyword in MEDIUM_RISK_KEYWORDS:
-            if keyword in symptom:  # symptom contains the keyword phrase
-                return "MEDIUM"
+    if _contains_keyword(symptoms_set, MEDIUM_RISK_KEYWORDS):
+        return "MEDIUM"
 
     return "LOW"
