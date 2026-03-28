@@ -7,7 +7,7 @@ import logging
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-
+from typing import Optional
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
@@ -61,6 +61,7 @@ class ExtractedData(BaseModel):
 class AnalyzeResponse(BaseModel):
     extracted_data: ExtractedData
     risk: str
+    maps_link: Optional[str] = None
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -113,6 +114,8 @@ def analyze(payload: AnalyzeRequest):
     # ── Risk classification ───────────────────────────────────────────────────
     risk = gemini_result.get("risk_level", "LOW")
 
+    maps_link = "https://www.google.com/maps/search/hospitals+near+me" if risk == "HIGH" else None
+
     # ── Structured request log ────────────────────────────────────────────────
     log_entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -129,4 +132,5 @@ def analyze(payload: AnalyzeRequest):
     return AnalyzeResponse(
         extracted_data=ExtractedData(symptoms=symptoms, condition=condition),
         risk=risk,
+        maps_link=maps_link,
     )
