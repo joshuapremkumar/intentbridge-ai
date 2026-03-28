@@ -31,7 +31,7 @@ def _get_model():
         return None
         
     genai.configure(api_key=api_key)
-    _model = genai.GenerativeModel("gemini-1.5-flash")
+    _model = genai.GenerativeModel("gemini-1.5-flash-latest")
     return _model
 
 # ── Prompt template ───────────────────────────────────────────────────────────
@@ -107,8 +107,7 @@ def call_gemini(user_input: str) -> dict:
         error_msg = str(exc)
         logger.error("Gemini API call or parsing failed: %s", error_msg, exc_info=True)
         
-        # User facing diagnostic fallback
-        user_facing_error = f"Gemini failed: {error_msg}"
+        user_facing_error = "Gemini processing failed"
         if "API key not valid" in error_msg or "API_KEY_INVALID" in error_msg:
             user_facing_error = "Invalid Gemini API Key configured in Environment."
 
