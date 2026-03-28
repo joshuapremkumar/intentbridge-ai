@@ -1,19 +1,23 @@
 """
 app.py
-IntentBridge AI — FastAPI entry point (Version 1 baseline).
+IntentBridge AI — FastAPI entry point with Google Cloud integration.
 """
 
 import logging
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 from gemini_service import call_gemini
 from utils.validators import sanitize_input, validate_input_length, is_meaningful_input
+from google_cloud import setup_cloud_logging, get_gemini_api_key, find_nearby_hospitals
+
+PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "")
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
 LOG_DIR = Path(__file__).parent / "logs"
@@ -28,6 +32,9 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger(__name__)
+
+# Initialize Cloud Logging on startup
+setup_cloud_logging()
 
 
 # ── FastAPI app ───────────────────────────────────────────────────────────────
@@ -59,10 +66,19 @@ class ExtractedData(BaseModel):
     condition: str
 
 
+class HospitalInfo(BaseModel):
+    name: str
+    address: str
+    rating: Optional[float] = None
+    link: str
+    open_now: Optional[bool] = None
+
+
 class AnalyzeResponse(BaseModel):
     extracted_data: ExtractedData
     risk_level: str
     maps_link: Optional[str] = None
+    hospitals: Optional[list[HospitalInfo]] = None
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -71,7 +87,9 @@ def serve_ui():
     """Serves the main application frontend interface."""
     html_path = Path(__file__).parent / "templates" / "index.html"
     if not html_path.exists():
-        return JSONResponse(status_code=404, content={"error": "UI template not found."})
+        return JSONResponse(
+            status_code=404, content={"error": "UI template not found."}
+        )
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
 
 
@@ -122,7 +140,21 @@ def analyze(payload: AnalyzeRequest):
         # ── Risk classification ───────────────────────────────────────────────────
         risk_level = gemini_result.get("risk_level", "LOW")
 
-        maps_link = "https://www.google.com/maps/search/hospitals+near+me" if risk_level == "HIGH" else None
+        maps_link = None
+        hospitals = None
+
+        if risk_level in ("MEDIUM", "HIGH"):
+            maps_link = "https://www.google.com/maps/search/hospitals+near+me"
+
+            places_api_key = os.getenv("PLACES_API_KEY")
+            if not places_api_key and PROJECT_ID:
+                places_api_key = get_gemini_api_key(
+                    PROJECT_ID.replace("GEMINI_API_KEY", "PLACES_API_KEY")
+                )
+
+            nearby = find_nearby_hospitals(api_key=places_api_key, max_results=3)
+            if nearby:
+                hospitals = [HospitalInfo(**h) for h in nearby]
 
         # ── Structured request log ────────────────────────────────────────────────
         log_entry = {
@@ -135,16 +167,18 @@ def analyze(payload: AnalyzeRequest):
         with open(LOG_DIR / "requests.jsonl", "a") as f:
             f.write(json.dumps(log_entry) + "\n")
 
-        logger.info("Analysis complete — risk_level=%s, symptoms=%d", risk_level, len(symptoms))
+        logger.info(
+            "Analysis complete — risk_level=%s, symptoms=%d", risk_level, len(symptoms)
+        )
 
         return AnalyzeResponse(
             extracted_data=ExtractedData(symptoms=symptoms, condition=condition),
             risk_level=risk_level,
             maps_link=maps_link,
+            hospitals=hospitals,
         )
 
     except HTTPException:
-        # Re-raise standard FastAPI validation/HTTP exceptions
         raise
     except Exception as exc:
         logger.error("Unexpected error in /analyze endpoint: %s", exc, exc_info=True)
@@ -154,6 +188,48 @@ def analyze(payload: AnalyzeRequest):
                 "symptoms": [],
                 "condition": "Unknown",
                 "risk_level": "LOW",
-                "error": "Internal Server Error"
-            }
+                "error": "Internal Server Error",
+            },
         )
+
+
+@app.get("/hospitals", response_model=list[HospitalInfo], tags=["Maps"])
+def get_hospitals(
+    lat: Optional[float] = Query(None, description="Latitude"),
+    lng: Optional[float] = Query(None, description="Longitude"),
+    location: Optional[str] = Query(
+        None, description="Location name (e.g., 'New York')"
+    ),
+):
+    """
+    Find nearby hospitals using Google Places API.
+
+    Provide either lat/lng coordinates or a location name.
+    """
+    places_api_key = os.getenv("PLACES_API_KEY")
+    if not places_api_key and PROJECT_ID:
+        try:
+            from google_cloud import get_places_api_key
+
+            places_api_key = get_places_api_key(PROJECT_ID)
+        except Exception:
+            pass
+
+    search_location = location or "current location"
+    hospitals = find_nearby_hospitals(
+        lat=lat,
+        lng=lng,
+        api_key=places_api_key,
+        location=search_location,
+        max_results=5,
+    )
+
+    if not hospitals:
+        return []
+
+    return [HospitalInfo(**h) for h in hospitals]
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc):
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
