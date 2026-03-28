@@ -107,7 +107,8 @@ def call_gemini(user_input: str) -> dict:
         error_msg = str(exc)
         logger.error("Gemini API call or parsing failed: %s", error_msg, exc_info=True)
         
-        user_facing_error = "Gemini processing failed"
+        # User facing diagnostic fallback
+        user_facing_error = f"Gemini failed: {error_msg}"
         if "API key not valid" in error_msg or "API_KEY_INVALID" in error_msg:
             user_facing_error = "Invalid Gemini API Key configured in Environment."
 
