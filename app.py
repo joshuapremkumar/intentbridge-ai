@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from gemini_service import call_gemini
@@ -103,6 +104,8 @@ def analyze(payload: AnalyzeRequest):
 
     if gemini_result["error"]:
         logger.error("Gemini error: %s", gemini_result["error"])
+        if gemini_result["error"] == "Missing GEMINI_API_KEY configuration":
+            return JSONResponse(status_code=500, content={"error": gemini_result["error"]})
         raise HTTPException(
             status_code=502,
             detail="Failed to process input with Gemini. Please try again.",

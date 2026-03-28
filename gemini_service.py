@@ -16,14 +16,20 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # ── Gemini client setup ───────────────────────────────────────────────────────
-_api_key = os.getenv("GEMINI_API_KEY")
-if not _api_key:
-    raise EnvironmentError(
-        "GEMINI_API_KEY is not set. Copy .env.example → .env and add your key."
-    )
+_model = None
 
-genai.configure(api_key=_api_key)
-_model = genai.GenerativeModel("gemini-1.5-flash")
+def _get_model():
+    global _model
+    if _model is not None:
+        return _model
+    
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        return None
+        
+    genai.configure(api_key=api_key)
+    _model = genai.GenerativeModel("gemini-1.5-flash")
+    return _model
 
 # ── Prompt template ───────────────────────────────────────────────────────────
 _PROMPT_TEMPLATE = """
@@ -59,8 +65,18 @@ def call_gemini(user_input: str) -> dict:
     """
     prompt = _PROMPT_TEMPLATE.format(user_input=user_input.strip())
 
+    model = _get_model()
+    if not model:
+        logger.error("GEMINI_API_KEY is not set.")
+        return {
+            "symptoms": [],
+            "condition": "",
+            "risk_level": "LOW",
+            "error": "Missing GEMINI_API_KEY configuration"
+        }
+
     try:
-        response = _model.generate_content(
+        response = model.generate_content(
             prompt,
             generation_config=genai.GenerationConfig(
                 response_mime_type="application/json",
