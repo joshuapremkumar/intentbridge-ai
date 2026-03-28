@@ -61,7 +61,7 @@ class TestAnalyzeEndpoint:
         response = client.post("/analyze", json={"input": "I have chest pain and can't breathe"})
         assert response.status_code == 200
         data = response.json()
-        assert data["risk"] == "HIGH"
+        assert data["risk_level"] == "HIGH"
         assert "chest pain" in data["extracted_data"]["symptoms"]
         assert data["extracted_data"]["condition"] == "possible cardiac event"
 
@@ -70,7 +70,7 @@ class TestAnalyzeEndpoint:
         response = client.post("/analyze", json={"input": "I have a mild headache and feel tired"})
         assert response.status_code == 200
         data = response.json()
-        assert data["risk"] == "LOW"
+        assert data["risk_level"] == "LOW"
         assert isinstance(data["extracted_data"]["symptoms"], list)
 
     @patch("app.call_gemini", return_value=MOCK_GEMINI_ERROR)
@@ -102,5 +102,5 @@ class TestAnalyzeEndpoint:
         assert "extracted_data" in data
         assert "symptoms" in data["extracted_data"]
         assert "condition" in data["extracted_data"]
-        assert "risk" in data
-        assert data["risk"] in ("LOW", "MEDIUM", "HIGH")
+        assert "risk_level" in data
+        assert data["risk_level"] in ("LOW", "MEDIUM", "HIGH")

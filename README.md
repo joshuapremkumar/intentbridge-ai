@@ -93,7 +93,7 @@ Analyze unstructured user text and return extracted health insights + risk level
     "symptoms": ["headache", "fever", "nausea"],
     "condition": "possible gastroenteritis"
   },
-  "risk": "MEDIUM"
+  "risk_level": "MEDIUM"
 }
 ```
 

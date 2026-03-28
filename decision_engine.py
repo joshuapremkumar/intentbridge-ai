@@ -34,7 +34,7 @@ LOW_RISK_KEYWORDS = {
 }
 
 
-def classify_risk(symptoms: List[str]) -> str:
+def classify_risk_level(symptoms: List[str]) -> str:
     """
     Determine risk level (LOW / MEDIUM / HIGH) from a list of symptom strings.
 

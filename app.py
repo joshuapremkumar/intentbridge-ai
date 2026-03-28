@@ -60,7 +60,7 @@ class ExtractedData(BaseModel):
 
 class AnalyzeResponse(BaseModel):
     extracted_data: ExtractedData
-    risk: str
+    risk_level: str
     maps_link: Optional[str] = None
 
 
@@ -112,9 +112,9 @@ def analyze(payload: AnalyzeRequest):
     condition: str = gemini_result["condition"]
 
     # ── Risk classification ───────────────────────────────────────────────────
-    risk = gemini_result.get("risk_level", "LOW")
+    risk_level = gemini_result.get("risk_level", "LOW")
 
-    maps_link = "https://www.google.com/maps/search/hospitals+near+me" if risk == "HIGH" else None
+    maps_link = "https://www.google.com/maps/search/hospitals+near+me" if risk_level == "HIGH" else None
 
     # ── Structured request log ────────────────────────────────────────────────
     log_entry = {
@@ -122,15 +122,15 @@ def analyze(payload: AnalyzeRequest):
         "input": clean_input,
         "symptoms": symptoms,
         "condition": condition,
-        "risk": risk,
+        "risk_level": risk_level,
     }
     with open(LOG_DIR / "requests.jsonl", "a") as f:
         f.write(json.dumps(log_entry) + "\n")
 
-    logger.info("Analysis complete — risk=%s, symptoms=%d", risk, len(symptoms))
+    logger.info("Analysis complete — risk_level=%s, symptoms=%d", risk_level, len(symptoms))
 
     return AnalyzeResponse(
         extracted_data=ExtractedData(symptoms=symptoms, condition=condition),
-        risk=risk,
+        risk_level=risk_level,
         maps_link=maps_link,
     )
