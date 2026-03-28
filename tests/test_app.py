@@ -42,15 +42,15 @@ MOCK_GEMINI_ERROR = {
 
 # ── Health check tests ────────────────────────────────────────────────────────
 class TestHealthCheck:
-    def test_root_returns_ok(self):
-        response = client.get("/")
+    def test_health_returns_ok(self):
+        response = client.get("/health")
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "ok"
         assert data["service"] == "IntentBridge AI"
 
-    def test_root_returns_version(self):
-        response = client.get("/")
+    def test_health_returns_version(self):
+        response = client.get("/health")
         assert "version" in response.json()
 
 

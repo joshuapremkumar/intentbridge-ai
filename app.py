@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field
 
 from gemini_service import call_gemini
@@ -66,7 +66,16 @@ class AnalyzeResponse(BaseModel):
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
-@app.get("/", tags=["Health"])
+@app.get("/", tags=["UI"])
+def serve_ui():
+    """Serves the main application frontend interface."""
+    html_path = Path(__file__).parent / "templates" / "index.html"
+    if not html_path.exists():
+        return JSONResponse(status_code=404, content={"error": "UI template not found."})
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
+
+
+@app.get("/health", tags=["Health"])
 def health_check():
     """Service health check."""
     return {
