@@ -84,56 +84,67 @@ def analyze(payload: AnalyzeRequest):
     Returns extracted symptoms, a possible condition, and a risk level
     (LOW / MEDIUM / HIGH) determined by keyword-based rule logic.
     """
-    # ── Input sanitization & validation ──────────────────────────────────────
-    clean_input = sanitize_input(payload.input)
+    try:
+        # ── Input sanitization & validation ──────────────────────────────────────
+        clean_input = sanitize_input(payload.input)
 
-    length_error = validate_input_length(clean_input)
-    if length_error:
-        raise HTTPException(status_code=422, detail=length_error)
+        length_error = validate_input_length(clean_input)
+        if length_error:
+            raise HTTPException(status_code=422, detail=length_error)
 
-    if not is_meaningful_input(clean_input):
-        raise HTTPException(
-            status_code=422,
-            detail="Input must contain at least one meaningful word.",
+        if not is_meaningful_input(clean_input):
+            raise HTTPException(
+                status_code=422,
+                detail="Input must contain at least one meaningful word.",
+            )
+
+        logger.info("Processing /analyze request.")
+
+        # ── Gemini extraction ─────────────────────────────────────────────────────
+        gemini_result = call_gemini(clean_input)
+
+        if gemini_result.get("error"):
+            logger.error("Gemini error: %s", gemini_result["error"])
+            return JSONResponse(status_code=500, content=gemini_result)
+
+        symptoms: list[str] = gemini_result["symptoms"]
+        condition: str = gemini_result["condition"]
+
+        # ── Risk classification ───────────────────────────────────────────────────
+        risk_level = gemini_result.get("risk_level", "LOW")
+
+        maps_link = "https://www.google.com/maps/search/hospitals+near+me" if risk_level == "HIGH" else None
+
+        # ── Structured request log ────────────────────────────────────────────────
+        log_entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "input": clean_input,
+            "symptoms": symptoms,
+            "condition": condition,
+            "risk_level": risk_level,
+        }
+        with open(LOG_DIR / "requests.jsonl", "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+
+        logger.info("Analysis complete — risk_level=%s, symptoms=%d", risk_level, len(symptoms))
+
+        return AnalyzeResponse(
+            extracted_data=ExtractedData(symptoms=symptoms, condition=condition),
+            risk_level=risk_level,
+            maps_link=maps_link,
         )
 
-    logger.info("Processing /analyze request.")
-
-    # ── Gemini extraction ─────────────────────────────────────────────────────
-    gemini_result = call_gemini(clean_input)
-
-    if gemini_result["error"]:
-        logger.error("Gemini error: %s", gemini_result["error"])
-        if gemini_result["error"] == "Missing GEMINI_API_KEY configuration":
-            return JSONResponse(status_code=500, content={"error": gemini_result["error"]})
-        raise HTTPException(
-            status_code=502,
-            detail="Failed to process input with Gemini. Please try again.",
+    except HTTPException:
+        # Re-raise standard FastAPI validation/HTTP exceptions
+        raise
+    except Exception as exc:
+        logger.error("Unexpected error in /analyze endpoint: %s", exc, exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={
+                "symptoms": [],
+                "condition": "Unknown",
+                "risk_level": "LOW",
+                "error": "Internal Server Error"
+            }
         )
-
-    symptoms: list[str] = gemini_result["symptoms"]
-    condition: str = gemini_result["condition"]
-
-    # ── Risk classification ───────────────────────────────────────────────────
-    risk_level = gemini_result.get("risk_level", "LOW")
-
-    maps_link = "https://www.google.com/maps/search/hospitals+near+me" if risk_level == "HIGH" else None
-
-    # ── Structured request log ────────────────────────────────────────────────
-    log_entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "input": clean_input,
-        "symptoms": symptoms,
-        "condition": condition,
-        "risk_level": risk_level,
-    }
-    with open(LOG_DIR / "requests.jsonl", "a") as f:
-        f.write(json.dumps(log_entry) + "\n")
-
-    logger.info("Analysis complete — risk_level=%s, symptoms=%d", risk_level, len(symptoms))
-
-    return AnalyzeResponse(
-        extracted_data=ExtractedData(symptoms=symptoms, condition=condition),
-        risk_level=risk_level,
-        maps_link=maps_link,
-    )

@@ -63,6 +63,7 @@ def call_gemini(user_input: str) -> dict:
     Returns:
         dict with keys: symptoms (list[str]), condition (str), risk_level (str), error (str|None)
     """
+    logger.info("Received input for Gemini: %s", user_input)
     prompt = _PROMPT_TEMPLATE.format(user_input=user_input.strip())
 
     model = _get_model()
@@ -70,7 +71,7 @@ def call_gemini(user_input: str) -> dict:
         logger.error("GEMINI_API_KEY is not set.")
         return {
             "symptoms": [],
-            "condition": "",
+            "condition": "Unknown",
             "risk_level": "LOW",
             "error": "Missing GEMINI_API_KEY configuration"
         }
@@ -83,7 +84,7 @@ def call_gemini(user_input: str) -> dict:
             )
         )
         raw_text = response.text.strip()
-        logger.info("Gemini responded successfully.")
+        logger.info("Raw Gemini response: %s", raw_text)
 
         # Strip accidental markdown fences if model ignores instructions
         if raw_text.startswith("```"):
@@ -93,17 +94,22 @@ def call_gemini(user_input: str) -> dict:
             raw_text = raw_text.strip()
 
         parsed = json.loads(raw_text)
+        condition = parsed.get("condition", "Unknown")
+        if not condition:
+            condition = "Unknown"
+
         return {
             "symptoms": parsed.get("symptoms", []),
-            "condition": parsed.get("condition", ""),
+            "condition": condition,
             "risk_level": parsed.get("risk_level", "LOW"),
             "error": None,
         }
 
-    except json.JSONDecodeError as exc:
-        logger.error("Failed to parse Gemini JSON response: %s", exc)
-        return {"symptoms": [], "condition": "", "risk_level": "LOW", "error": "Invalid JSON from Gemini."}
-
     except Exception as exc:
-        logger.error("Gemini API call failed: %s", exc)
-        return {"symptoms": [], "condition": "", "risk_level": "LOW", "error": str(exc)}
+        logger.error("Gemini API call or parsing failed: %s", exc, exc_info=True)
+        return {
+            "symptoms": [],
+            "condition": "Unknown",
+            "risk_level": "LOW",
+            "error": "Gemini processing failed"
+        }
