@@ -31,7 +31,7 @@ def _get_model():
         return None
         
     genai.configure(api_key=api_key)
-    _model = genai.GenerativeModel("gemini-pro")
+    _model = genai.GenerativeModel("gemini-2.0-flash")
     return _model
 
 # ── Prompt template ───────────────────────────────────────────────────────────
