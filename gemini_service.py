@@ -24,7 +24,10 @@ def _get_model():
         return _model
     
     api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
+    if api_key:
+        logger.info("GEMINI_API_KEY is present.")
+    else:
+        logger.warning("GEMINI_API_KEY is missing!")
         return None
         
     genai.configure(api_key=api_key)
@@ -77,12 +80,7 @@ def call_gemini(user_input: str) -> dict:
         }
 
     try:
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(
-                response_mime_type="application/json",
-            )
-        )
+        response = model.generate_content(prompt)
         raw_text = response.text.strip()
         logger.info("Raw Gemini response: %s", raw_text)
 
